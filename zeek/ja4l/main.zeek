@@ -7,6 +7,7 @@
 # NOTE: JA4L can not work when traffic is out of order
 # Supress negative duration errors in local.zeek by setting
 # redef FINGERPRINT::JA4L::suppress_neg_ja4l_errors = T;
+# NOTE: Zeek JA4L does not attempt to handle duplicate packets.  
 
 module FINGERPRINT::JA4L;
 
@@ -57,6 +58,8 @@ redef record FINGERPRINT::Info += {
 redef record Conn::Info += {
     ja4l: string &log &default = "";
     ja4ls: string &log &default = "";
+    ja4l_delta: string &log &default = "";
+    ja4ls_delta: string &log &default = "";
 };
 
 # Create the log stream and file
@@ -77,7 +80,7 @@ event new_connection(c: connection) {
     
     local rp = get_current_packet_header();
     if (rp?$tcp) {
-        # Packet must have the SYN flag but not the ACK flag
+        # Packet must have the SYN flag but not the ACK flag or we're out of order
         if ((rp$tcp$flags & TH_SYN) == 0 || (rp$tcp$flags & TH_ACK) == TH_ACK) {
             return;
         }
@@ -99,16 +102,16 @@ event ConnThreshold::packets_threshold_crossed(c: connection, threshold: count, 
     local rp = get_current_packet_header();
     if (is_orig && threshold == 2) {
         c$fp$ja4l$ack = get_current_packet_timestamp();
-        local dt = (c$fp$ja4l$ack - c$fp$ja4l$synack) / 2.0;
-        if (dt < 0.0) {
+        local ja4l_c_a = (c$fp$ja4l$ack - c$fp$ja4l$synack) / 2.0;
+        if (ja4l_c_a < 0.0) {
             if (!suppress_neg_ja4l_errors)
                 Reporter::error(fmt("JA4L negative duration: (ack - synack)/2=%f uid=%s id=%s",
-                                    dt, c$uid, c$id));
+                                    ja4l_c_a, c$uid, c$id));
             return;
         }
-        c$fp$ja4l$ja4l_c = cat(double_to_count(dt));
+        c$fp$ja4l$ja4l_c = cat(double_to_count(ja4l_c_a));
         c$fp$ja4l$ja4l_c += FINGERPRINT::delimiter;
-        c$fp$ja4l$ja4l_c += cat(c$fp$ja4l$ttl_c);
+        c$fp$ja4l$ja4l_c += cat(c$fp$ja4l$ttl_c);  # ja4l_b
         c$fp$ja4l$uid = c$uid;
         c$fp$ja4l$ts = c$start_time;
         c$fp$ja4l$id = c$id;
@@ -119,15 +122,17 @@ event ConnThreshold::packets_threshold_crossed(c: connection, threshold: count, 
             return;
         }
         c$fp$ja4l$first_client_data = get_current_packet_timestamp();
-        local dt2 = (c$fp$ja4l$first_client_data - c$fp$ja4l$server_hello) / 2.0;
-        if (dt2 < 0.0) {
+        local ja4l_c_c = (c$fp$ja4l$first_client_data - c$fp$ja4l$server_hello) / 2.0;
+        if (ja4l_c_c < 0.0) {
             if (!suppress_neg_ja4l_errors)
                 Reporter::error(fmt("JA4L negative duration: (first_client_data - server_hello)/2=%f uid=%s id=%s",
-                                    dt2, c$uid, c$id));
+                                    ja4l_c_c, c$uid, c$id));
             return;
         }
         c$fp$ja4l$ja4l_c += FINGERPRINT::delimiter;
-        c$fp$ja4l$ja4l_c += cat(double_to_count(dt2));
+        c$fp$ja4l$ja4l_c += cat(double_to_count(ja4l_c_c));
+
+        # This is where logging would go for a separate ja4l log that doesn't wait for connection_state_remove
     } else if (threshold != 1) {
         return;
     } else {
@@ -143,16 +148,16 @@ event ConnThreshold::packets_threshold_crossed(c: connection, threshold: count, 
         } else {
             return;   #breaks the chain
         }
-        local dt3 = (c$fp$ja4l$synack - c$fp$ja4l$syn) / 2.0;
-        if (dt3 < 0.0) {
+        local ja4l_s_a = (c$fp$ja4l$synack - c$fp$ja4l$syn) / 2.0;
+        if (ja4l_s_a < 0.0) {
             if (!suppress_neg_ja4l_errors)
                 Reporter::error(fmt("JA4L negative duration: (synack - syn)/2=%f uid=%s id=%s",
-                                    dt3, c$uid, c$id));
+                                    ja4l_s_a, c$uid, c$id));
             return;
         }
-        c$fp$ja4l$ja4l_s = cat(double_to_count(dt3));
+        c$fp$ja4l$ja4l_s = cat(double_to_count(ja4l_s_a));
         c$fp$ja4l$ja4l_s += FINGERPRINT::delimiter;
-        c$fp$ja4l$ja4l_s += cat(c$fp$ja4l$ttl_s);
+        c$fp$ja4l$ja4l_s += cat(c$fp$ja4l$ttl_s);  # ja4ls_b
 
         ConnThreshold::set_packets_threshold(c,c$orig$num_pkts + 1,T);
     }
@@ -176,15 +181,15 @@ event ssl_server_hello(c: connection, version: count, record_version: count, pos
     }
     if (c?$fp && c$fp$ja4l$server_hello == 0) {
         c$fp$ja4l$server_hello = get_current_packet_timestamp();
-        local dt4 = (c$fp$ja4l$server_hello - c$fp$ja4l$client_hello) / 2.0;
-        if (dt4 < 0.0) {
+        local ja4l_s_c = (c$fp$ja4l$server_hello - c$fp$ja4l$client_hello) / 2.0;
+        if (ja4l_s_c < 0.0) {
             if (!suppress_neg_ja4l_errors)
                 Reporter::error(fmt("JA4L negative duration: (server_hello - client_hello)/2=%f uid=%s id=%s",
-                                    dt4, c$uid, c$id));
+                                    ja4l_s_c, c$uid, c$id));
             return;
         }
         c$fp$ja4l$ja4l_s += FINGERPRINT::delimiter;
-        c$fp$ja4l$ja4l_s += cat(double_to_count(dt4));
+        c$fp$ja4l$ja4l_s += cat(double_to_count(ja4l_s_c));
         # get F on next orig packet
         ConnThreshold::set_packets_threshold(c,c$orig$num_pkts + 1,T);
     }
@@ -251,6 +256,23 @@ event QUIC::handshake_packet(c: connection, is_orig: bool, version: count, dcid:
 }
 
 event connection_state_remove(c: connection) {
-        c$conn$ja4l =  c$fp$ja4l$ja4l_c;
-        c$conn$ja4ls = c$fp$ja4l$ja4l_s;
+        if ( c?$fp && c$fp?$ja4l ) {
+            c$conn$ja4l =  c$fp$ja4l$ja4l_c;
+            c$conn$ja4ls = c$fp$ja4l$ja4l_s;
+
+            if ( c$fp$ja4l$server_handshake != 0 ) {
+                c$conn$ja4l_delta = "";
+                c$conn$ja4ls_delta = "";
+            } else if ( c$fp$ja4l$server_hello != 0 ) {
+                local client_denom = c$fp$ja4l$ack - c$fp$ja4l$synack;
+                if ( client_denom != 0 && c$fp$ja4l$first_client_data != 0 ) {
+                    c$conn$ja4l_delta = fmt("%.1f", (c$fp$ja4l$first_client_data - c$fp$ja4l$server_hello) / client_denom);
+                }
+
+                local server_denom = c$fp$ja4l$synack - c$fp$ja4l$syn;
+                if ( server_denom != 0 && c$fp$ja4l$client_hello != 0 ) {
+                    c$conn$ja4ls_delta = fmt("%.1f", (c$fp$ja4l$server_hello - c$fp$ja4l$client_hello) / server_denom);
+                }
+            }
+        }
 }
