@@ -147,17 +147,13 @@ def hops(x):
     return (initial_ttl - x)
 
 def first_last_alpn(alpn):
-    # Keep the first and last character of the ALPN value, which is all the
-    # fingerprint needs. Matches the rust implementation: a non-ascii
-    # character is replaced with '9', a single character is followed by '0',
-    # and an empty value (or a missing ALPN extension) becomes '00'.
+    # Empty or missing ALPN becomes '00'; a single character supplies both ends.
     if isinstance(alpn, list):
         alpn = alpn[0] if alpn else ''
     if not alpn:
         return '00'
+    # Retain Rust-style '9' substitution for non-ASCII endpoints for now.
     first = alpn[0] if ord(alpn[0]) < 128 else '9'
-    if len(alpn) == 1:
-        return f"{first}0"
     last = alpn[-1] if ord(alpn[-1]) < 128 else '9'
     return f"{first}{last}"
 
