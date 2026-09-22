@@ -5,9 +5,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from common import epoch_diff, get_cache  # noqa: E402
+from common import cache_update, epoch_diff, get_cache  # noqa: E402
 from ja4 import first_last_alpn, hops, to_ja4, to_ja4s  # noqa: E402
 from ja4h import to_ja4h  # noqa: E402
+from ja4x import to_ja4x  # noqa: E402
 
 
 def test_epoch_diff_spans_seconds():
@@ -108,3 +109,34 @@ def test_tls_fingerprints_handle_alpn_edge_cases(
     render(x, debug_stream=-1)
     for field in fields:
         assert x[field].split("_", 1)[0] == prefix + expected
+
+
+def _ja4x_input(extension_lengths, nr_oids):
+    return {
+        "hl": "x509af",
+        "stream": 3,
+        "extension_lengths": extension_lengths,
+        "cert_extensions": [f"2.5.29.{i}" for i in range(10, 10 + nr_oids)],
+        "issuer_sequence": ["1"],
+        "subject_sequence": ["1"],
+        "rdn_oids": ["2.5.4.3", "2.5.4.3"],
+    }
+
+
+def test_to_ja4x_two_digit_count_is_one_certificate():
+    # tshark reports a lone certificate's counts as plain strings
+    x = _ja4x_input("10", nr_oids=10)
+    cache_update(x, "stream", 3, -1)
+    to_ja4x(x, debug_stream=-1)
+    assert "JA4X.1" in x
+    assert "JA4X.2" not in x
+
+
+def test_to_ja4x_string_and_list_counts_agree():
+    as_string = _ja4x_input("3", nr_oids=3)
+    as_list = _ja4x_input(["3"], nr_oids=3)
+    cache_update(as_string, "stream", 4, -1)
+    cache_update(as_list, "stream", 5, -1)
+    to_ja4x(as_string, debug_stream=-1)
+    to_ja4x(as_list, debug_stream=-1)
+    assert as_string["JA4X.1"] == as_list["JA4X.1"]
